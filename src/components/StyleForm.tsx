@@ -1,10 +1,15 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 
+const CREATE_ASSISTANT_URL = "https://functions.poehali.dev/a5952a75-64a1-4585-ba25-f367df16b35d";
+
 export default function StyleForm() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [clientLink, setClientLink] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
   const [form, setForm] = useState({
     clientName: "",
     notes: "",
@@ -19,12 +24,62 @@ export default function StyleForm() {
     }
   };
 
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      setFileName(file.name);
+      setForm((prev) => ({ ...prev, file }));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1200));
+    setError("");
+
+    let file_data: string | null = null;
+    let file_name: string | null = null;
+
+    if (form.file) {
+      const buffer = await form.file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      file_data = btoa(binary);
+      file_name = form.file.name;
+    }
+
+    const res = await fetch(CREATE_ASSISTANT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: form.clientName,
+        notes: form.notes,
+        file_data,
+        file_name,
+      }),
+    });
+
+    const data = await res.json();
     setLoading(false);
+
+    if (!res.ok) {
+      setError(data.error || "Произошла ошибка. Попробуйте ещё раз.");
+      return;
+    }
+
+    const link = `${window.location.origin}/assistant/${data.id}`;
+    setClientLink(link);
     setSubmitted(true);
+  };
+
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(clientLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -54,13 +109,32 @@ export default function StyleForm() {
               Ассистент создан!
             </h3>
             <p className="text-neutral-500 mb-6">
-              Ссылка для клиента <span className="font-semibold text-neutral-900">{form.clientName}</span> будет отправлена вам на почту.
+              Отправьте эту ссылку клиенту{" "}
+              <span className="font-semibold text-neutral-900">
+                {form.clientName}
+              </span>
+              :
             </p>
+            <div className="flex gap-2 mb-8">
+              <input
+                readOnly
+                value={clientLink}
+                className="flex-1 border border-neutral-200 px-4 py-3 text-sm text-neutral-700 focus:outline-none"
+              />
+              <button
+                onClick={copyLink}
+                className="bg-neutral-900 text-white px-4 py-3 hover:bg-neutral-700 transition-all duration-300 flex items-center gap-2 text-sm uppercase tracking-wide whitespace-nowrap"
+              >
+                <Icon name={copied ? "CheckCheck" : "Copy"} size={16} />
+                {copied ? "Скопировано" : "Скопировать"}
+              </button>
+            </div>
             <button
               onClick={() => {
                 setSubmitted(false);
                 setForm({ clientName: "", notes: "", file: null });
                 setFileName(null);
+                setClientLink("");
               }}
               className="uppercase tracking-widest text-sm border border-black px-6 py-3 hover:bg-black hover:text-white transition-all duration-300"
             >
@@ -69,6 +143,12 @@ export default function StyleForm() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">
+                {error}
+              </div>
+            )}
+
             <div className="flex flex-col gap-2">
               <label className="uppercase text-xs tracking-widest text-neutral-400">
                 Имя клиента
@@ -89,7 +169,11 @@ export default function StyleForm() {
               <label className="uppercase text-xs tracking-widest text-neutral-400">
                 Лук-бук клиента (PDF или изображение)
               </label>
-              <label className="cursor-pointer border border-dashed border-neutral-300 hover:border-neutral-900 transition-colors duration-200 px-4 py-8 flex flex-col items-center gap-3 text-center group">
+              <label
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                className="cursor-pointer border border-dashed border-neutral-300 hover:border-neutral-900 transition-colors duration-200 px-4 py-8 flex flex-col items-center gap-3 text-center group"
+              >
                 <Icon
                   name="Upload"
                   size={28}
@@ -101,7 +185,7 @@ export default function StyleForm() {
                   </span>
                 ) : (
                   <span className="text-neutral-400 text-sm">
-                    Нажмите, чтобы загрузить файл
+                    Перетащите файл сюда или нажмите для выбора
                     <br />
                     <span className="text-xs text-neutral-300">
                       PDF, JPG, PNG — до 20 МБ
